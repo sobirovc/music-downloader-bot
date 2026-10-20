@@ -36,6 +36,7 @@ async def download_instagram(message: types.Message):
         'outtmpl': f'{file_id}.%(ext)s',
         'quiet': True,
         'no_warnings': True,
+        'extractor_args': {'youtube': {'player_client': ['android', 'ios']}},
         'http_headers': {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
         }
@@ -97,6 +98,7 @@ async def search_music(message: types.Message):
         'default_search': 'ytsearch10',
         'quiet': True,
         'extract_flat': True,
+        'extractor_args': {'youtube': {'player_client': ['android', 'ios']}},
         'http_headers': {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
         }
@@ -152,6 +154,7 @@ async def process_music_download(callback: CallbackQuery):
         'outtmpl': out_filename,
         'quiet': True,
         'no_warnings': True,
+        'extractor_args': {'youtube': {'player_client': ['android', 'ios']}},
         'http_headers': {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
         }
@@ -198,4 +201,4 @@ async def main():
 
 if __name__ == '__main__':
     asyncio.run(main())
-        
+    
