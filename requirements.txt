@@ -1,5 +1,8 @@
 aiogram
 flask
+gtts
+requests
 yt-dlp
+
 
 
