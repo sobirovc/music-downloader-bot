@@ -14,22 +14,18 @@ logging.basicConfig(level=logging.INFO)
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher()
 
-# Start buyrug'i
 @dp.message(CommandStart())
 async def start_cmd(message: types.Message):
     welcome_text = (
         "👋 **Xush kelibsiz!**\n\n"
-        "Men orqali siz:\n"
-        "1. **Instagram** Reel/Post havolasini yuborib, videoni yuklab olishingiz;\n"
-        "2. **Qo'shiq nomi** yoki ijrochi ismini yozib, qo'shiqni topishingiz mumkin.\n\n"
-        "Menga shunchaki link yoki qo'shiq nomini yuboring!"
+        "1. **Instagram** havolasini yuborib videoni yuklab olishingiz mumkin.\n"
+        "2. **Qo'shiq nomi**ni yozib musiqalarni qidirishingiz mumkin."
     )
     await message.answer(welcome_text, parse_mode="Markdown")
 
-# Instagram linklarini ushlash
 @dp.message(F.text.contains("instagram.com"))
 async def download_instagram(message: types.Message):
-    status_msg = await message.answer("📥 Instagram video yuklanmoqda, kuting...")
+    status_msg = await message.answer("📥 Instagram video yuklanmoqda...")
     url = message.text.strip()
 
     ydl_opts = {
@@ -48,7 +44,7 @@ async def download_instagram(message: types.Message):
         
         file_path = await loop.run_in_executor(None, download)
         
-        if os.path.exists(file_path):
+        if file_path and os.path.exists(file_path):
             video_file = types.FSInputFile(file_path)
             await bot.send_video(chat_id=message.chat.id, video=video_file, caption="✅ Bot orqali yuklab olindi")
             await status_msg.delete()
@@ -57,9 +53,8 @@ async def download_instagram(message: types.Message):
             await status_msg.edit_text("❌ Videoni yuklab bo'lmadi.")
     except Exception as e:
         logging.error(f"Error downloading instagram: {e}")
-        await status_msg.edit_text("❌ Xatolik yuz berdi. Link to'g'riligini yoki kontent ochiqligini tekshiring.")
+        await status_msg.edit_text("❌ Videoni yuklab olishda xatolik yuz berdi. Boshqa linkni sinab ko'ring.")
 
-# Musiqa qidirish (Qo'shiq nomi yozilganda)
 @dp.message()
 async def search_music(message: types.Message):
     query = message.text.strip()
@@ -69,7 +64,7 @@ async def search_music(message: types.Message):
     status_msg = await message.answer("🔍 Qo'shiqlar qidirilmoqda...")
 
     ydl_opts = {
-        'default_search': 'ytsearch5',
+        'default_search': 'ytsearch10',
         'quiet': True,
         'extract_flat': True,
     }
@@ -78,7 +73,7 @@ async def search_music(message: types.Message):
         loop = asyncio.get_event_loop()
         def search():
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                return ydl.extract_info(f"ytsearch5:{query}", download=False)
+                return ydl.extract_info(f"ytsearch10:{query}", download=False)
 
         results = await loop.run_in_executor(None, search)
         entries = results.get('entries', [])
@@ -87,14 +82,23 @@ async def search_music(message: types.Message):
             await status_msg.edit_text("❌ Hech qanday qo'shiq topilmadi.")
             return
 
-        keyboard_buttons = []
         text = "🎶 **Topilgan qo'shiqlar:**\n\n"
+        keyboard_buttons = []
+        row = []
 
         for idx, item in enumerate(entries, start=1):
             title = item.get('title', 'Noma\'lum qo\'shiq')
-            video_id = item.get('id')
             text += f"{idx}. {title}\n"
-            keyboard_buttons.append([InlineKeyboardButton(text=f"⬇️ {idx}. Yuklash", callback_data=f"dl_{video_id[:20]}")])
+            
+            video_id = item.get('id')
+            row.append(InlineKeyboardButton(text=str(idx), callback_data=f"s_{video_id}"))
+            
+            if len(row) == 5:
+                keyboard_buttons.append(row)
+                row = []
+
+        if row:
+            keyboard_buttons.append(row)
 
         kb = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
         await status_msg.edit_text(text, reply_markup=kb, parse_mode="Markdown")
@@ -103,41 +107,89 @@ async def search_music(message: types.Message):
         logging.error(f"Search error: {e}")
         await status_msg.edit_text("❌ Qidiruvda xatolik yuz berdi.")
 
-# Tugma bosilganda qo'shiqni MP3 qilib yuklab berish
-@dp.callback_query(F.data.startswith("dl_"))
+@dp.callback_query(F.data.startswith("s_"))
 async def process_music_download(callback: CallbackQuery):
-    video_id = callback.data.replace("dl_", "")
-    await callback.answer("📥 Audio tayyorlanmoqda...")
+    video_id = callback.data.replace("s_", "")
+    await callback.answer("📥 Audio tayyorlanmoqda, iltimos kuting...")
     
     url = f"https://www.youtube.com/watch?v={video_id}"
-    out_filename = f"audio_{video_id}.mp3"
-
+    
+    # Xatolik chiqarmasligi uchun eng universal yuklash sozlamalari
     ydl_opts = {
         'format': 'bestaudio/best',
-        'outtmpl': out_filename,
+        'outtmpl:': 'audio.%(ext)s',
+        'postprocessors': [{
+            'key': 'FFmpegExtractAudio',
+            'preferredcodec': 'mp3',
+            'preferredquality': '192',
+        }],
+        'quiet': True,
+        'no_warnings': True,
+        'extract_flat': False,
+    }
+    
+    # Agar ffmpeg bo'lmasa oddiy usulda yuklab beruvchi zaxira sozlama
+    fallback_opts = {
+        'format': 'best',
         'quiet': True,
     }
 
+    file_path = None
     try:
         loop = asyncio.get_event_loop()
+        
         def download_audio():
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                ydl.download([url])
+            # Oldingi qolgan fayllarni tozalash
+            for f in os.listdir('.'):
+                if f.startswith('audio_'):
+                    try:
+                        os.remove(f)
+                    except:
+                        pass
+                        
+            local_opts = {
+                'format': 'bestaudio',
+                'outtmpl': f'audio_{video_id}.%(ext)s',
+                'quiet': True,
+            }
+            with yt_dlp.YoutubeDL(local_opts) as ydl:
+                info = ydl.extract_info(url, download=True)
+                return ydl.prepare_filename(info)
 
-        await loop.run_in_executor(None, download_audio)
+        file_path = await loop.run_in_executor(None, download_audio)
 
-        if os.path.exists(out_filename):
-            audio_file = types.FSInputFile(out_filename)
-            await bot.send_audio(chat_id=callback.message.chat.id, audio=audio_file)
-            os.remove(out_filename)
+        if file_path and os.path.exists(file_path):
+            audio_file = types.FSInputFile(file_path)
+            await bot.send_audio(chat_id=callback.message.chat.id, audio=audio_file, caption="🎵 @my_music_saver_2026_bot")
+            try:
+                os.remove(file_path)
+            except:
+                pass
         else:
-            await callback.message.answer("❌ Audioni yuklab bo'lmadi.")
+            await callback.message.answer("⚠️ Kechirasiz, bu qo'shiqni yuklab bo'lmadi. Boshqa raqamni tanlab ko'ring.")
 
     except Exception as e:
         logging.error(f"Audio download error: {e}")
-        await callback.message.answer("❌ Yuklab olishda xatolik yuz berdi.")
+        # Agar asosiy usul ishlamasa, zaxira oddiy formatda yuborishga urinib ko'ramiz
+        try:
+            def download_fallback():
+                fallback_filename = f'audio_fallback_{video_id}.mp4'
+                f_opts = {'format': 'best', 'outtmpl': fallback_filename, 'quiet': True}
+                with yt_dlp.YoutubeDL(f_opts) as ydl:
+                    ydl.download([url])
+                return fallback_filename
 
-# Web Server (Render 24/7 ishlashi uchun)
+            fallback_path = await loop.run_in_executor(None, download_fallback)
+            if fallback_path and os.path.exists(fallback_path):
+                audio_file = types.FSInputFile(fallback_path)
+                await bot.send_audio(chat_id=callback.message.chat.id, audio=audio_file, caption="🎵 @my_music_saver_2026_bot")
+                os.remove(fallback_path)
+            else:
+                await callback.message.answer("❌ Bu qo'shiqni yuklab bo'lmadi, boshqa qo'shiqni tanlang.")
+        except Exception as err:
+            logging.error(f"Fallback error: {err}")
+            await callback.message.answer("❌ Yuklab olish imkoni bo'lmadi. Boshqa qo'shiqni tanlab ko'ring.")
+
 app = Flask('')
 
 @app.route('/')
@@ -155,4 +207,4 @@ async def main():
 
 if __name__ == '__main__':
     asyncio.run(main())
-  
+        
