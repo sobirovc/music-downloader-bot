@@ -14,19 +14,17 @@ logging.basicConfig(level=logging.INFO)
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher()
 
-# Foydalanuvchi qidiruv natijalarini saqlash
 user_data = {}
 
 @dp.message(CommandStart())
 async def start_cmd(message: types.Message):
     welcome_text = (
         "👋 **Xush kelibsiz!**\n\n"
-        "1. **Instagram** havolasini yuborib videoni yuklab olishingiz va videodagi audioni ajratib olishingiz mumkin.\n"
+        "1. **Instagram** havolasini yuborib videoni yuklab olishingiz mumkin.\n"
         "2. **Qo'shiq nomi**ni yozib musiqalarni qidirishingiz mumkin."
     )
     await message.answer(welcome_text, parse_mode="Markdown")
 
-# Instagram linklarini ushlash
 @dp.message(F.text.contains("instagram.com"))
 async def download_instagram(message: types.Message):
     status_msg = await message.answer("📥 Instagram video yuklanmoqda...")
@@ -38,6 +36,9 @@ async def download_instagram(message: types.Message):
         'outtmpl': f'{file_id}.%(ext)s',
         'quiet': True,
         'no_warnings': True,
+        'http_headers': {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        }
     }
 
     try:
@@ -51,12 +52,9 @@ async def download_instagram(message: types.Message):
         
         if file_path and os.path.exists(file_path):
             video_file = types.FSInputFile(file_path)
-            
-            # Videoning ostiga Qo'shiqni yuklash tugmasini qo'shamiz
             kb = InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(text="🎧 Videodagi qo'shiqni yuklash", callback_data=f"insta_audio_{file_id}")]
             ])
-            
             await bot.send_video(
                 chat_id=message.chat.id, 
                 video=video_file, 
@@ -64,16 +62,13 @@ async def download_instagram(message: types.Message):
                 reply_markup=kb
             )
             await status_msg.delete()
-            
-            # Tayyor faylni vaqtincha saqlab turamiz (audio so'ralsa ishlatish uchun)
             user_data[file_id] = file_path
         else:
             await status_msg.edit_text("❌ Videoni yuklab bo'lmadi.")
     except Exception as e:
         logging.error(f"Error downloading instagram: {e}")
-        await status_msg.edit_text("❌ Xatolik yuz berdi. Link to'g'riligini tekshiring.")
+        await status_msg.edit_text("❌ Xatolik yuz berdi.")
 
-# Instagram videodan audio ajratib berish
 @dp.callback_query(F.data.startswith("insta_audio_"))
 async def process_insta_audio(callback: CallbackQuery):
     file_id = callback.data.replace("insta_audio_", "")
@@ -88,9 +83,8 @@ async def process_insta_audio(callback: CallbackQuery):
             caption="🎵 Videodan ajratib olingan audio\n\n@my_music_saver_2026_bot"
         )
     else:
-        await callback.answer("❌ Audio fayl topilmadi, qaytadan link yuboring.", show_alert=True)
+        await callback.answer("❌ Audio fayl topilmadi.", show_alert=True)
 
-# Musiqa qidiruv
 @dp.message()
 async def search_music(message: types.Message):
     query = message.text.strip()
@@ -103,6 +97,9 @@ async def search_music(message: types.Message):
         'default_search': 'ytsearch10',
         'quiet': True,
         'extract_flat': True,
+        'http_headers': {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        }
     }
 
     try:
@@ -125,13 +122,12 @@ async def search_music(message: types.Message):
         for idx, item in enumerate(entries, start=1):
             title = item.get('title', 'Noma\'lum qo\'shiq')
             text += f"{idx}. {title}\n"
-            
             video_id = item.get('id')
-            row.append(InlineKeyboardButton(text=str(idx), callback_data=f"dl_{video_id}"))
-            
-            if len(row) == 5:
-                keyboard_buttons.append(row)
-                row = []
+            if video_id:
+                row.append(InlineKeyboardButton(text=str(idx), callback_data=f"dl_{video_id}"))
+                if len(row) == 5:
+                    keyboard_buttons.append(row)
+                    row = []
 
         if row:
             keyboard_buttons.append(row)
@@ -143,7 +139,6 @@ async def search_music(message: types.Message):
         logging.error(f"Search error: {e}")
         await status_msg.edit_text("❌ Qidiruvda xatolik yuz berdi.")
 
-# Qo'shiqni MP3 qilib yuklab berish
 @dp.callback_query(F.data.startswith("dl_"))
 async def process_music_download(callback: CallbackQuery):
     video_id = callback.data.replace("dl_", "")
@@ -152,12 +147,14 @@ async def process_music_download(callback: CallbackQuery):
     url = f"https://www.youtube.com/watch?v={video_id}"
     out_filename = f"music_{video_id}.m4a"
 
-    # Eng barqaror yuklash rejimi
     ydl_opts = {
-        'format': 'bestaudio[ext=m4a]/bestaudio/best',
+        'format': 'bestaudio/best',
         'outtmpl': out_filename,
         'quiet': True,
         'no_warnings': True,
+        'http_headers': {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        }
     }
 
     try:
@@ -169,7 +166,7 @@ async def process_music_download(callback: CallbackQuery):
 
         file_path = await loop.run_in_executor(None, download_audio)
 
-        if os.path.exists(file_path):
+        if file_path and os.path.exists(file_path):
             audio_file = types.FSInputFile(file_path, filename=f"audio_{video_id}.mp3")
             await bot.send_audio(
                 chat_id=callback.message.chat.id, 
@@ -178,7 +175,7 @@ async def process_music_download(callback: CallbackQuery):
             )
             os.remove(file_path)
         else:
-            await callback.message.answer("❌ Audioni yuklab bo'lmadi.")
+            await callback.message.answer("❌ Bu qo'shiqni yuklab bo'lmadi. Boshqasini tanlab ko'ring.")
 
     except Exception as e:
         logging.error(f"Audio download error: {e}")
@@ -201,3 +198,4 @@ async def main():
 
 if __name__ == '__main__':
     asyncio.run(main())
+        
